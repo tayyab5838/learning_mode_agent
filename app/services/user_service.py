@@ -9,6 +9,26 @@ class UserService:
         self.db = db
 
     def register_user(self, payload: UserCreate) -> User:
+        """
+        Register a new user
+
+        Args:
+            payload (UserCreate): {
+            username: str
+            email: EmailStr
+            password: str
+            }
+        Raises:
+            HTTPException: if username or email already exist
+
+        Returns:
+            User: {
+            id: int
+            username: str
+            email: EmailStr
+            created_at: datetime
+            }
+        """        
         # unique username/email check
         existing = self.db.query(User).filter((User.username == payload.username) | (User.email == payload.email)).first()
         if existing:

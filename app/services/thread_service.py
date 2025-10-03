@@ -6,6 +6,18 @@ class ThreadService:
         self.db = db
 
     def create_thread(self, session_id: int, title: str | None = None) -> Thread:
+        """
+        Create a thread based on session_id
+
+        Args:
+            session_id (int): session id
+            title (str | None, optional): title of the thread. Defaults to None.
+
+        Returns:
+            ThreadCreate: {
+            title: string
+            }
+        """        
         thread = Thread(session_id=session_id, title=title)
         self.db.add(thread)
         self.db.commit()
