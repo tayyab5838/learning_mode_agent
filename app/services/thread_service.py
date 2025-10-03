@@ -1,4 +1,3 @@
-# app/services/thread_service.py
 from sqlalchemy.orm import Session
 from app.models.models import Thread
 

@@ -1,4 +1,3 @@
-# app/services/user_service.py
 from sqlalchemy.orm import Session
 from app.models.models import User
 from app.schemas.schemas import UserCreate

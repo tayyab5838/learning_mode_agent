@@ -1,4 +1,3 @@
-# app/services/message_service.py
 from sqlalchemy.orm import Session
 from app.models.models import Message
 from typing import List

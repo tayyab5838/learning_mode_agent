@@ -1,4 +1,3 @@
-# app/routers/messages.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
@@ -12,10 +11,6 @@ from app.models.models import User
 from agents import Runner
 from app.agent_services.main_agent import triage_agent
 from app.agent_services.agent_config import run_config
-
-# Replace with your actual LLM runner import
-# from app.llm import agent, run_config, Runner
-# For this example we'll reference Runner.run(...) as in your earlier code.
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
