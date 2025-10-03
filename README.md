@@ -15,23 +15,6 @@ This project demonstrates:
 - ✅ Multi-threaded conversation storage (sessions → threads → messages)  
 - ✅ AI-powered chat endpoint with conversation history persistence  
 
----
-
-## 📂 Project Structure
-
-```
-
-app/
-│── models/          # SQLAlchemy ORM models
-│── schemas/         # Pydantic schemas
-│── services/        # Business logic (auth, sessions, threads, messages)
-│── routers/         # API routes divided by module
-│── utils/           # DB setup, JWT handling, password hashing
-│── main.py          # FastAPI entrypoint
-
-````
-
----
 
 ## ⚡ Features
 
@@ -224,9 +207,6 @@ MIT License. Feel free to use and modify.
 ## 👨‍💻 Author
 
 **Tayyab Hussain**
+
 🚀 Building AI-powered apps with FastAPI & OpenAI SDK.
-
-```
-
----
 
