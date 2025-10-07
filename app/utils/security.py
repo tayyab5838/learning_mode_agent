@@ -6,14 +6,15 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
-from app.utils.db import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from app.utils.db import get_db_session
 from app.models.models import User
 
 load_dotenv()
 
 SECRET_KEY = os.getenv("SECRET_KEY", "SUPERSECRET")
-ALGORITHM = os.getenv("ALGORITM","HS256")
+ALGORITHM = os.getenv("ALGORITHM","HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -38,7 +39,7 @@ def decode_token(token: str):
     except JWTError:
         return None
 
-def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
+async def get_current_user(db: AsyncSession = Depends(get_db_session), token: str = Depends(oauth2_scheme)) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -50,7 +51,8 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     sub = payload.get("sub")
     if not sub:
         raise credentials_exception
-    user = db.query(User).filter(User.id == int(sub)).first()
+    result = await db.execute(select(User).where(User.id == int(sub)))
+    user = result.scalars().first()
     if not user:
         raise credentials_exception
     return user

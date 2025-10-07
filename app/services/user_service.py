@@ -1,54 +1,86 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, or_
 from app.models.models import User
 from app.schemas.schemas import UserCreate
 from app.utils.security import get_password_hash, verify_password, create_access_token
 from fastapi import HTTPException, status
 
+
+class UserAlreadyExistsError(Exception):
+    """Raised when user already exists"""
+    pass
+
+
+class UserNotFoundError(Exception):
+    """Raised when user is not found"""
+    pass
+
+
+class InvalidCredentialsError(Exception):
+    """Raised when credentials are invalid"""
+    pass
+
 class UserService:
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
 
-    def register_user(self, payload: UserCreate) -> User:
+    async def register_user(self, payload: UserCreate) -> User:
         """
-        Register a new user
+        Register a new user.
 
         Args:
             payload (UserCreate): {
-            username: str
-            email: EmailStr
-            password: str
+                username: str,
+                email: EmailStr,
+                password: str
             }
+
         Raises:
-            HTTPException: if username or email already exist
+            HTTPException: If username or email already exists.
 
         Returns:
-            User: {
-            id: int
-            username: str
-            email: EmailStr
-            created_at: datetime
-            }
+            User: Newly created user.
         """        
-        # unique username/email check
-        existing = self.db.query(User).filter((User.username == payload.username) | (User.email == payload.email)).first()
-        if existing:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username or email already exists")
+        stmt = select(User).where(or_(User.username == payload.username, User.email == payload.email))
+        result = await self.db.execute(stmt)
+        if result.scalar_one_or_none():
+            raise UserAlreadyExistsError(f"Username '{payload.username}' already exists")
+        result = await self.db.execute(
+            select(User).where(User.email == payload.email)
+        )
+        if result.scalar_one_or_none():
+            raise UserAlreadyExistsError(f"Email '{payload.email}' already exists")
+     
         hashed = get_password_hash(payload.password)
-        user = User(username=payload.username, email=payload.email, password=hashed)
-        self.db.add(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        new_user = User(username=payload.username, email=payload.email, password=hashed)
+        self.db.add(new_user)
+        await self.db.commit()
+        await self.db.refresh(new_user)
+        return new_user
 
-    def authenticate_user(self, username: str, password: str):
-        user = self.db.query(User).filter(User.username == username).first()
+    async def authenticate_user(self, username: str, password: str):
+        """
+        Authenticate user with username and password.
+        """
+        stmt = select(User).where(User.username == username)
+        result = await self.db.execute(stmt)
+        user = result.scalar_one_or_none()
+        print("user :", user)
         if not user or not verify_password(password, user.password):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+            raise InvalidCredentialsError("Invalid credentials")
         return user
 
-    def create_token_for_user(self, user) -> str:
+    async def create_token_for_user(self, user) -> str:
+        """
+        Create JWT token for the user.
+        """
         token = create_access_token(data={"sub": str(user.id)})
         return token
 
-    def get_by_username(self, username: str):
-        return self.db.query(User).filter(User.username == username).first()
+    async def get_by_username(self, username: str):
+        """
+        Retrieve a user by username.
+        """
+        stmt = select(User).where(User.username == username)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()

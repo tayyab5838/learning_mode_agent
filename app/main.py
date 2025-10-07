@@ -1,14 +1,31 @@
 # app/main.py
 from fastapi import FastAPI
-from app.utils.db import engine, Base
+from contextlib import asynccontextmanager
+# from app.utils.db import engine, Base
 from app.routers import auth, sessions, threads, messages
+from app.utils.db import init_db, close_db
 
-app = FastAPI(title="Agent Chat API")
 
-# Create tables on startup (dev). In production use Alembic
-@app.on_event("startup")
-def on_startup():
-    Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events"""
+    # Startup
+    print("🚀 Starting up...")
+    await init_db()
+    print("✅ Database initialized")
+    yield
+    # Shutdown
+    print("🛑 Shutting down...")
+    await close_db()
+    print("✅ Database connections closed")
+
+
+app = FastAPI(
+    title="Learning Mode Agent API",
+    description="API for Learning Mode Agent",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 # include routers
 app.include_router(auth.router)
