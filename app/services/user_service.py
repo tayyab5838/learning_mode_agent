@@ -3,7 +3,6 @@ from sqlalchemy import select, or_
 from app.models.models import User
 from app.schemas.schemas import UserCreate
 from app.utils.security import get_password_hash, verify_password, create_access_token
-from fastapi import HTTPException, status
 
 
 class UserAlreadyExistsError(Exception):
@@ -84,3 +83,29 @@ class UserService:
         stmt = select(User).where(User.username == username)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_user_by_email(self, email: str) -> User:
+        """
+        Get user by email.
+        
+        Raises:
+            UserNotFoundError: If user not found
+        """
+        result = await self.db.execute(
+            select(User).where(User.email == email)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise UserNotFoundError(f"User with email '{email}' not found")
+        
+        return user
+
+    async def create_token_for_user(self, user: User) -> str:  # noqa: F811
+        """Create JWT token for user"""
+        token_data = {
+            "sub": user.username,
+            "user_id": user.id,
+            "email": user.email
+        }
+        return create_access_token(token_data)
