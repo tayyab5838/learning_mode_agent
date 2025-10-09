@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 from app.schemas.schemas import UserCreate, UserOut, Token
@@ -8,7 +8,14 @@ from app.services.user_service import (
     UserService,
     UserAlreadyExistsError,
     InvalidCredentialsError,
+    UserNotFoundError
 )
+from app.services.email_service import (
+    EmailService,
+    EmailSendError,
+    VerificationTokenError
+)
+from app.config import settings
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -100,6 +107,18 @@ async def register(
         logger.info(f"Attempting to register user: {user_data.username}")
         user = await svc.register_user(user_data)
         logger.info(f"User registered successfully: {user.username} (ID: {user.id})")
+
+         # Send verification email (don't fail registration if email fails)
+        if settings.EMAIL_VERIFICATION_REQUIRED:
+            try:
+                email_svc = EmailService(db)
+                token = await email_svc.generate_verification_token(user.id)
+                await email_svc.send_verification_email(user, token)
+                logger.info(f"Verification email sent to {user.email}")
+            except EmailSendError as e:
+                logger.warning(f"Failed to send verification email: {str(e)}")
+                # Don't fail registration, user can request resend later
+        
         return user
         
     except UserAlreadyExistsError as e:
@@ -235,3 +254,137 @@ async def health_check():
         "service": "authentication",
         "version": "1.0.0"
     }
+
+
+@router.get(
+    "/verify-email",
+    summary="Verify email address",
+    description="Verify user email using token from email",
+    responses={
+        200: {"description": "Email verified successfully"},
+        400: {"description": "Invalid or expired token"}
+    }
+)
+async def verify_email(
+    token: str = Query(..., description="Verification token from email"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Verify user email address.
+    
+    **Parameters:**
+    - **token**: Verification token received via email
+    
+    **Returns:**
+    - Success message
+    
+    **Example:**
+    ```bash
+    curl -X GET "http://localhost:8000/auth/verify-email?token=<token>"
+    ```
+    """
+    email_svc = EmailService(db)
+    
+    try:
+        logger.info("Email verification attempted with token")
+        user = await email_svc.verify_email_token(token)
+        logger.info(f"Email verified successfully for user {user.id}")
+        
+        return {
+            "message": "Email verified successfully",
+            "username": user.username,
+            "email": user.email
+        }
+        
+    except VerificationTokenError as e:
+        logger.warning(f"Email verification failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error during email verification: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during email verification"
+        )
+
+
+# ============================================================================
+# ENDPOINT: Resend Verification Email
+# ============================================================================
+
+@router.post(
+    "/resend-verification",
+    summary="Resend verification email",
+    description="Resend verification email to user",
+    responses={
+        200: {"description": "Verification email sent"},
+        400: {"description": "User already verified or not found"},
+        429: {"description": "Too many requests"}
+    }
+)
+async def resend_verification_email(
+    email: str = Body(..., embed=True, description="User email address"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Resend verification email to user.
+    
+    **Parameters:**
+    - **email**: User's email address
+    
+    **Returns:**
+    - Success message
+    
+    **Example:**
+    ```bash
+    curl -X POST "http://localhost:8000/auth/resend-verification" \\
+         -H "Content-Type: application/json" \\
+         -d '{"email": "user@example.com"}'
+    ```
+    """
+    user_svc = UserService(db)
+    email_svc = EmailService(db)
+    
+    try:
+        # Find user by email
+        user = await user_svc.get_user_by_email(email)
+        
+        if user.is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is already verified"
+            )
+        
+        # Resend verification email
+        await email_svc.resend_verification_email(user)
+        logger.info(f"Verification email resent to {email}")
+        
+        return {
+            "message": "Verification email sent successfully",
+            "email": email
+        }
+        
+    except UserNotFoundError:
+        # Don't reveal if user exists
+        logger.warning(f"Verification resend attempted for non-existent email: {email}")
+        return {
+            "message": "If the email exists, a verification email has been sent",
+            "email": email
+        }
+        
+    except EmailSendError as e:
+        logger.error(f"Failed to resend verification email: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send verification email. Please try again later."
+        )
+        
+    except Exception as e:
+        logger.error(f"Error resending verification email: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while resending verification email"
+        )
