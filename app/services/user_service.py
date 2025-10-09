@@ -1,8 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from app.models.models import User
 from app.schemas.schemas import UserCreate
-from app.utils.security import get_password_hash, verify_password, create_access_token
+from app.utils.security import hash_password, verify_password, create_access_token
 
 
 class UserAlreadyExistsError(Exception):
@@ -19,70 +20,112 @@ class InvalidCredentialsError(Exception):
     """Raised when credentials are invalid"""
     pass
 
+
 class UserService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def register_user(self, payload: UserCreate) -> User:
+    async def register_user(self, user_data: UserCreate) -> User:
         """
         Register a new user.
-
-        Args:
-            payload (UserCreate): {
-                username: str,
-                email: EmailStr,
-                password: str
-            }
-
+        
         Raises:
-            HTTPException: If username or email already exists.
-
-        Returns:
-            User: Newly created user.
-        """        
-        stmt = select(User).where(or_(User.username == payload.username, User.email == payload.email))
-        result = await self.db.execute(stmt)
-        if result.scalar_one_or_none():
-            raise UserAlreadyExistsError(f"Username '{payload.username}' already exists")
+            UserAlreadyExistsError: If username or email already exists
+        """
+        # Check if username exists
         result = await self.db.execute(
-            select(User).where(User.email == payload.email)
+            select(User).where(User.username == user_data.username)
         )
         if result.scalar_one_or_none():
-            raise UserAlreadyExistsError(f"Email '{payload.email}' already exists")
-     
-        hashed = get_password_hash(payload.password)
-        new_user = User(username=payload.username, email=payload.email, password=hashed)
+            raise UserAlreadyExistsError(f"Username '{user_data.username}' already exists")
+        
+        # Check if email exists
+        result = await self.db.execute(
+            select(User).where(User.email == user_data.email)
+        )
+        if result.scalar_one_or_none():
+            raise UserAlreadyExistsError(f"Email '{user_data.email}' already exists")
+        
+        # Create new user
+        hashed_password = hash_password(user_data.password)
+        new_user = User(
+            username=user_data.username,
+            email=user_data.email,
+            hashed_password=hashed_password
+        )
+        
         self.db.add(new_user)
-        await self.db.commit()
-        await self.db.refresh(new_user)
+        
+        try:
+            await self.db.commit()
+            await self.db.refresh(new_user)
+        except IntegrityError:
+            await self.db.rollback()
+            raise UserAlreadyExistsError("User with this username or email already exists")
+        
         return new_user
 
-    async def authenticate_user(self, username: str, password: str):
+    async def authenticate_user(self, username: str, password: str) -> User:
         """
-        Authenticate user with username and password.
+        Authenticate a user.
+        
+        Raises:
+            InvalidCredentialsError: If credentials are invalid
         """
-        stmt = select(User).where(User.username == username)
-        result = await self.db.execute(stmt)
+        from app.config import settings  # noqa: F401
+        
+        result = await self.db.execute(
+            select(User).where(User.username == username)
+        )
         user = result.scalar_one_or_none()
-        print("user :", user)
-        if not user or not verify_password(password, user.password):
-            raise InvalidCredentialsError("Invalid credentials")
+        
+        if not user:
+            raise InvalidCredentialsError("Incorrect username or password")
+        
+        if not verify_password(password, user.hashed_password):
+            raise InvalidCredentialsError("Incorrect username or password")
+        
+        # Optionally check email verification
+        if settings.EMAIL_VERIFICATION_REQUIRED and not user.is_verified:
+            raise InvalidCredentialsError(
+                "Email not verified. Please check your email for verification link."
+            )
+        
         return user
 
-    async def create_token_for_user(self, user) -> str:
+    async def get_user_by_id(self, user_id: int) -> User:
         """
-        Create JWT token for the user.
+        Get user by ID.
+        
+        Raises:
+            UserNotFoundError: If user not found
         """
-        token = create_access_token(data={"sub": str(user.id)})
-        return token
+        result = await self.db.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise UserNotFoundError(f"User with id {user_id} not found")
+        
+        return user
 
-    async def get_by_username(self, username: str):
+    async def get_user_by_username(self, username: str) -> User:
         """
-        Retrieve a user by username.
+        Get user by username.
+        
+        Raises:
+            UserNotFoundError: If user not found
         """
-        stmt = select(User).where(User.username == username)
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        result = await self.db.execute(
+            select(User).where(User.username == username)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise UserNotFoundError(f"User '{username}' not found")
+        
+        return user
 
     async def get_user_by_email(self, email: str) -> User:
         """
@@ -101,7 +144,7 @@ class UserService:
         
         return user
 
-    async def create_token_for_user(self, user: User) -> str:  # noqa: F811
+    async def create_token_for_user(self, user: User) -> str:
         """Create JWT token for user"""
         token_data = {
             "sub": user.username,
