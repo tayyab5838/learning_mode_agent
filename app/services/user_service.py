@@ -2,8 +2,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from app.models.models import User
-from app.schemas.schemas import UserCreate
-from app.utils.security import hash_password, verify_password, create_access_token
+from app.schemas.schemas import UserCreate, UserOut
+from app.utils.security import get_password_hash, verify_password, create_access_token
 
 
 class UserAlreadyExistsError(Exception):
@@ -25,7 +25,7 @@ class UserService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def register_user(self, user_data: UserCreate) -> User:
+    async def register_user(self, user_data: UserCreate) -> UserOut:
         """
         Register a new user.
         
@@ -47,11 +47,11 @@ class UserService:
             raise UserAlreadyExistsError(f"Email '{user_data.email}' already exists")
         
         # Create new user
-        hashed_password = hash_password(user_data.password)
+        hashed_password = get_password_hash(user_data.password)
         new_user = User(
             username=user_data.username,
             email=user_data.email,
-            hashed_password=hashed_password
+            password=hashed_password
         )
         
         self.db.add(new_user)
@@ -82,7 +82,7 @@ class UserService:
         if not user:
             raise InvalidCredentialsError("Incorrect username or password")
         
-        if not verify_password(password, user.hashed_password):
+        if not verify_password(password, user.password):
             raise InvalidCredentialsError("Incorrect username or password")
         
         # Optionally check email verification
