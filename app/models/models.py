@@ -15,9 +15,11 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc), nullable=True)
 
+    # Relationships
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     verification_tokens = relationship("EmailVerificationToken", back_populates="user", cascade="all, delete-orphan")
-
+    reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
+    
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', verified={self.is_verified})>"
 
@@ -84,3 +86,37 @@ class EmailVerificationToken(Base):
     def is_used(self) -> bool:
         """Check if token is used"""
         return self.used_at is not None
+    
+
+class PasswordResetToken(Base):
+    """Model for password reset tokens"""
+    
+    __tablename__ = "password_reset_tokens"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    
+    # Relationship
+    user = relationship("User", back_populates="reset_tokens")
+    
+    def __repr__(self):
+        return f"<PasswordResetToken(id={self.id}, user_id={self.user_id}, used={self.used_at is not None})>"
+    
+    @property
+    def is_expired(self) -> bool:
+        """Check if token is expired"""
+        return datetime.now(timezone.utc) > self.expires_at
+    
+    @property
+    def is_used(self) -> bool:
+        """Check if token is used"""
+        return self.used_at is not None
+    
+    @property
+    def is_valid(self) -> bool:
+        """Check if token is valid (not expired and not used)"""
+        return not self.is_expired and not self.is_used

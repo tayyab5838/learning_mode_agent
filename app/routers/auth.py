@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
-from app.schemas.schemas import UserCreate, UserOut, Token
 from app.utils.db import get_db_session
 from app.utils.security import get_current_user
+from app.schemas.schemas import (
+    UserCreate, UserOut, Token,
+    PasswordResetRequest, PasswordResetConfirm, PasswordResetResponse
+)
 from app.services.user_service import (
     UserService,
     UserAlreadyExistsError,
@@ -15,6 +18,13 @@ from app.services.email_service import (
     EmailSendError,
     VerificationTokenError
 )
+
+from app.services.password_reset_service import (
+    PasswordResetService,
+    InvalidResetTokenError,
+    PasswordResetError
+)
+
 from app.config import settings
 
 # Setup logging
@@ -387,4 +397,198 @@ async def resend_verification_email(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while resending verification email"
+        )
+
+
+# ============================================================================
+# ENDPOINT: Request Password Reset
+# ============================================================================
+
+@router.post(
+    "/forgot-password",
+    response_model=PasswordResetResponse,
+    summary="Request password reset",
+    description="Send password reset email to user",
+    responses={
+        200: {"description": "Password reset email sent"},
+        500: {"description": "Failed to send email"}
+    }
+)
+async def forgot_password(
+    request: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Request password reset email.
+    
+    **Parameters:**
+    - **email**: User's email address
+    
+    **Returns:**
+    - Success message (doesn't reveal if email exists)
+    
+    **Example:**
+    ```bash
+    curl -X POST "http://localhost:8000/auth/forgot-password" \\
+         -H "Content-Type: application/json" \\
+         -d '{"email": "user@example.com"}'
+    ```
+    
+    **Note:** For security, this endpoint always returns success,
+    even if the email doesn't exist in the system.
+    """
+    reset_svc = PasswordResetService(db)
+    
+    try:
+        logger.info(f"Password reset requested for email: {request.email}")
+        await reset_svc.request_password_reset(request.email)
+        
+        # Always return success to prevent email enumeration
+        return PasswordResetResponse(
+            message="If that email address is in our system, we have sent you a password reset link.",
+            email=request.email
+        )
+        
+    except EmailSendError as e:
+        logger.error(f"Failed to send password reset email: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send password reset email. Please try again later."
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing password reset request: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing your request"
+        )
+
+
+# ============================================================================
+# ENDPOINT: Reset Password
+# ============================================================================
+
+@router.post(
+    "/reset-password",
+    response_model=PasswordResetResponse,
+    summary="Reset password",
+    description="Reset password using token from email",
+    responses={
+        200: {"description": "Password reset successfully"},
+        400: {"description": "Invalid or expired token"},
+        422: {"description": "Validation error"}
+    }
+)
+async def reset_password(
+    request: PasswordResetConfirm,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Reset password using token from email.
+    
+    **Parameters:**
+    - **token**: Reset token from email
+    - **new_password**: New password (minimum 8 characters)
+    
+    **Returns:**
+    - Success message
+    
+    **Example:**
+    ```bash
+    curl -X POST "http://localhost:8000/auth/reset-password" \\
+         -H "Content-Type: application/json" \\
+         -d '{
+           "token": "abc123...",
+           "new_password": "newSecurePassword123"
+         }'
+    ```
+    """
+    reset_svc = PasswordResetService(db)
+    
+    try:
+        logger.info("Password reset attempted with token")
+        user = await reset_svc.reset_password(request.token, request.new_password)
+        logger.info(f"Password reset successfully for user {user.id}")
+        
+        return PasswordResetResponse(
+            message="Password has been reset successfully. You can now log in with your new password."
+        )
+        
+    except InvalidResetTokenError as e:
+        logger.warning(f"Password reset failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+        
+    except PasswordResetError as e:
+        logger.error(f"Password reset error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reset password. Please try again."
+        )
+        
+    except Exception as e:
+        logger.error(f"Error during password reset: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while resetting password"
+        )
+
+
+# ============================================================================
+# ENDPOINT: Verify Reset Token (Optional)
+# ============================================================================
+
+@router.get(
+    "/verify-reset-token",
+    summary="Verify reset token",
+    description="Check if a password reset token is valid",
+    responses={
+        200: {"description": "Token is valid"},
+        400: {"description": "Token is invalid or expired"}
+    }
+)
+async def verify_reset_token(
+    token: str = Query(..., description="Reset token to verify"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Verify if a password reset token is valid.
+    
+    **Parameters:**
+    - **token**: Reset token to verify
+    
+    **Returns:**
+    - Token validity status
+    
+    **Example:**
+    ```bash
+    curl -X GET "http://localhost:8000/auth/verify-reset-token?token=<token>"
+    ```
+    
+    **Use Case:** Frontend can call this before showing the reset password form
+    """
+    reset_svc = PasswordResetService(db)
+    
+    try:
+        reset_token = await reset_svc.verify_reset_token(token)
+        
+        return {
+            "valid": True,
+            "message": "Token is valid",
+            "expires_at": reset_token.expires_at.isoformat()
+        }
+        
+    except InvalidResetTokenError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error verifying reset token: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while verifying token"
         )
