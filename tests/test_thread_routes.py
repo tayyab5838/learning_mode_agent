@@ -38,7 +38,7 @@ async def test_create_thread_success(client: AsyncClient):
             headers={"Authorization": f"Bearer {token}"}
         )
         
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert "id" in data
         assert data["session_id"] == session_id
@@ -56,7 +56,7 @@ async def test_create_thread_without_title(client: AsyncClient):
             headers={"Authorization": f"Bearer {token}"}
         )
         
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert data["title"] is None
 
@@ -71,7 +71,7 @@ async def test_create_thread_empty_title(client: AsyncClient):
             headers={"Authorization": f"Bearer {token}"}
         )
         
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert data["title"] == ""
 
@@ -166,7 +166,7 @@ async def test_create_multiple_threads(client: AsyncClient):
                 json=payload,
                 headers={"Authorization": f"Bearer {token}"}
             )
-            assert response.status_code == 200
+            assert response.status_code == 201
             thread_ids.append(response.json()["id"])
         
         # All threads should have unique IDs

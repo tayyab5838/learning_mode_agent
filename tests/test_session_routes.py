@@ -28,7 +28,7 @@ async def test_create_session_success(client: AsyncClient):
             headers={"Authorization": f"Bearer {token}"}
         )
         
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert "id" in data
         assert "user_id" in data
@@ -45,7 +45,7 @@ async def test_create_session_with_agent_type(client: AsyncClient):
             headers={"Authorization": f"Bearer {token}"}
         )
         
-        assert response.status_code == 200
+        assert response.status_code == 201
         data = response.json()
         assert data["agent_type"] == "learning_mode"
 
@@ -75,7 +75,7 @@ async def test_create_multiple_sessions(client: AsyncClient):
                 f"/sessions/?agent_type=agent_{i}",
                 headers={"Authorization": f"Bearer {token}"}
             )
-            assert response.status_code == 200
+            assert response.status_code == 201
             session_ids.append(response.json()["id"])
         
         # All sessions should have different IDs
