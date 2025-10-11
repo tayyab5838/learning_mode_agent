@@ -32,6 +32,23 @@ class TokenData(BaseModel):
     username: Optional[str] = None
     user_id: Optional[int] = None
 
+# ---- Password Reset ----
+class PasswordResetRequest(BaseModel):
+    """Schema for password reset request"""
+    email: EmailStr = Field(..., description="Email address for password reset")
+
+
+class PasswordResetConfirm(BaseModel):
+    """Schema for password reset confirmation"""
+    token: str = Field(..., min_length=10, description="Password reset token")
+    new_password: str = Field(..., min_length=8, max_length=100, description="New password")
+
+
+class PasswordResetResponse(BaseModel):
+    """Schema for password reset response"""
+    message: str
+    email: Optional[str] = None
+
 
 # ---- Session ----
 class SessionCreate(BaseModel):
