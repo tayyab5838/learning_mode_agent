@@ -11,12 +11,51 @@ from app.services.message_service import MessageService
 from app.models.models import User
 
 from agents import Runner
-from app.agent_services.main_agent import triage_agent
+from app.agent_services.main_agent import triage_agent, thread_title_generator_Agent
 from app.agent_services.agent_config import run_config
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
+
+
+# Add this function in app/routers/messages.py after imports
+
+async def generate_thread_name(first_message: str) -> str:
+    """
+    Generate a short thread name based on the first message using LLM.
+    
+    Args:
+        first_message: The first user message in the thread
+        
+    Returns:
+        A short, descriptive thread name (max 50 characters)
+    """
+    try:
+        # Create a simple prompt for name generation
+        name_prompt = f"Generate a short title for this conversation:\n\n{first_message}"
+        
+        result = await Runner.run(thread_title_generator_Agent, name_prompt, run_config=run_config)
+        thread_name = str(result.final_output).strip()
+        
+        # Clean up the name
+        thread_name = thread_name.replace('"', '').replace("'", '')
+        
+        # Limit to 50 characters
+        if len(thread_name) > 50:
+            thread_name = thread_name[:30] + "..."
+        
+        logger.info(f"Generated thread name: '{thread_name}'")
+        return thread_name
+        
+    except Exception as e:
+        logger.error(f"Error generating thread name: {str(e)}", exc_info=True)
+        # Fallback to a default name based on first few words
+        words = first_message.split()[:5]
+        fallback_name = " ".join(words)
+        if len(fallback_name) > 50:
+            fallback_name = fallback_name[:47] + "..."
+        return fallback_name or "New Conversation"
 
 
 @router.post(
@@ -128,6 +167,22 @@ async def send_message(
             detail="Failed to retrieve message history"
         )
 
+    
+    # 4.5. Generate thread name if this is the first message
+    is_first_message = len(history) == 1
+    if is_first_message and not thread.title:
+        try:
+            logger.info(f"Generating thread name for thread {thread_id}") 
+            thread_name = await generate_thread_name(payload.content)
+            # Update thread title
+            thread_svc = ThreadService(db)
+            await thread_svc.update_thread_title(thread_id, thread_name)
+            logger.info(f"Thread {thread_id} named: '{thread_name}'")
+        except Exception as e:
+            # Don't fail the message if naming fail
+            logger.warning(f"Failed to generate thread name for thread {thread_id}: {str(e)}")
+
+
     # 5. Run LLM
     try:
         logger.info(f"Running LLM for thread {thread_id}")
@@ -185,18 +240,6 @@ async def send_message(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to format response"
         )
-
-# @router.get("/{thread_id}", response_model=List[MessageOut])
-# async def get_thread_history(thread_id: int, db: AsyncSession = Depends(get_db_session), current_user: User = Depends(get_current_user)):
-#     thread_svc = ThreadService(db)
-#     thread = await thread_svc.get_thread_by_id(thread_id)
-#     if not thread:
-#         raise HTTPException(status_code=404, detail="Thread not found")
-#     if thread.session.user_id != current_user.id:
-#         raise HTTPException(status_code=403, detail="Not allowed")
-#     msg_svc = MessageService(db)
-#     msgs = await msg_svc.get_messages_for_thread(thread_id)
-#     return [MessageOut.from_orm(m) for m in msgs]
 
 @router.get(
     "/{thread_id}",
