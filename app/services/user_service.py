@@ -151,4 +151,4 @@ class UserService:
             "user_id": user.id,
             "email": user.email
         }
-        return create_access_token(token_data)
+        return create_access_token(data=token_data)

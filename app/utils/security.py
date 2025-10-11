@@ -48,10 +48,10 @@ async def get_current_user(db: AsyncSession = Depends(get_db_session), token: st
     payload = decode_token(token)
     if not payload:
         raise credentials_exception
-    sub = payload.get("sub")
-    if not sub:
+    user_id = payload.get("user_id")
+    if not user_id:
         raise credentials_exception
-    result = await db.execute(select(User).where(User.id == int(sub)))
+    result = await db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalars().first()
     if not user:
         raise credentials_exception
