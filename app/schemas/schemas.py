@@ -69,7 +69,7 @@ class SessionOut(BaseModel):
 # ---- Thread ----
 class ThreadCreate(BaseModel):
     """Schema for creating a new thread"""
-    title: Optional[str] = Field(None, max_length=200, description="Thread title")
+    title: Optional[str] = Field(None, max_length=50, description="Thread title")
 
 
 class ThreadOut(BaseModel):
